@@ -10,6 +10,8 @@ import { u8aToHex } from "@polkadot/util"
 import { decodeAddress } from "@polkadot/util-crypto"
 import BigNumber from "bignumber.js"
 import toast, { Toaster } from "react-hot-toast"
+import { UniqueChain, UniqueChainInstance } from '@unique-nft/sdk';
+
 import { ArrowUpDown, Wallet, Loader2, AlertCircle } from "lucide-react"
 
 // Correct decimals constants as per blockchain specs
@@ -100,37 +102,55 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
   }, [])
 
   // Function to get DOT balance on Unique Network
-  const getDotBalanceOnUnique = useCallback(async () => {
-    if (!uniqueApi || !selectedAccount) return null;
+// Function to get DOT balance on Unique Network using SDK
+// Function to get DOT balance on Unique Network using SDK
+const getDotBalanceOnUnique = useCallback(async () => {
+  if (!selectedAccount) return null;
 
-    try {
-      const balance: any = await uniqueApi.query.common.balance(
-        DOT_FOREIGN_ASSET_COLLECTION_ID,
-        { Substrate: selectedAccount.address }
-      );
+  try {
+    const uniqueChain = UniqueChain({ 
+      baseUrl: 'https://rest.unique.network/v2/unique', 
+    });
 
-      // Check if balance is not empty and greater than 0
-      if (balance && !balance.isEmpty && balance.toString() !== '0') {
-        return {
-          balance: formatBalance(balance, { decimals: DOT_DECIMALS, withSi: false }),
-          raw: balance.toString(),
-        };
-      }
-      
+    console.log("Fetching DOT balance via Unique SDK...");
+
+    // Get DOT foreign asset balance using SDK
+    const balanceResult = await uniqueChain.fungible.getAccountBalance({
+      collectionId: DOT_FOREIGN_ASSET_COLLECTION_ID, // 437
+      address: selectedAccount.address
+    });
+
+    console.log("Unique SDK DOT balance result:", balanceResult);
+
+    // Check if balance exists and is greater than 0
+    // SDK returns {balance: "8000000000", decimals: 10, symbol: "DOT", ...}
+    if (balanceResult && balanceResult.balance && balanceResult.balance !== '0') {
+      // Manual formatting since formatBalance might have issues with SDK data
+      const rawBalance = new BigNumber(balanceResult.balance);
+      const divisor = new BigNumber(10).pow(DOT_DECIMALS);
+      const formattedBalance = rawBalance.dividedBy(divisor).toFixed();
+
       return {
-        balance: "0",
-        raw: "0",
-      };
-      
-    } catch (error) {
-      console.error("Error getting DOT balance on Unique:", error);
-      return {
-        balance: "0", 
-        raw: "0",
+        balance: formattedBalance,
+        raw: balanceResult.balance,
       };
     }
-  }, [uniqueApi, selectedAccount]);
-
+    
+    return {
+      balance: "0",
+      raw: "0",
+    };
+    
+  } catch (error) {
+    console.error("Error getting DOT balance via SDK:", error);
+    
+    // Fallback: return zero balance instead of throwing
+    return {
+      balance: "0", 
+      raw: "0",
+    };
+  }
+}, [selectedAccount]);
   // Initialize APIs with better error handling
   const initializeAPIs = useCallback(async () => {
     if (!isBrowser) {
@@ -205,92 +225,95 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
     }
   }
 
-  const fetchBalances = useCallback(async () => {
-    if (!selectedAccount) return
+const fetchBalances = useCallback(async () => {
+  if (!selectedAccount) return
 
-    try {
-      console.log("Fetching balances for account:", selectedAccount.address)
+  try {
+    console.log("Fetching balances for account:", selectedAccount.address)
 
-      // Polkadot balance - DOT with 10 decimals
-      if (polkadotApi) {
-        try {
-          const polkadotAccountInfo: any = await polkadotApi.query.system.account(selectedAccount.address)
+    // Polkadot balance - DOT with 10 decimals
+    if (polkadotApi) {
+      try {
+        const polkadotAccountInfo: any = await polkadotApi.query.system.account(selectedAccount.address)
 
-          const polkadotFree = polkadotAccountInfo.data.free
-          const polkadotReserved = polkadotAccountInfo.data.reserved
+        const polkadotFree = polkadotAccountInfo.data.free
+        const polkadotReserved = polkadotAccountInfo.data.reserved
 
-          console.log("Polkadot DOT balances:", {
+        console.log("Polkadot DOT balances:", {
+          free: polkadotFree.toString(),
+          reserved: polkadotReserved.toString(),
+          decimals: DOT_DECIMALS,
+        })
+
+        setPolkadotBalance({
+          free: formatBalance(polkadotFree, { decimals: DOT_DECIMALS, withSi: false }),
+          reserved: formatBalance(polkadotReserved, { decimals: DOT_DECIMALS, withSi: false }),
+          total: formatBalance(polkadotFree.add(polkadotReserved), { decimals: DOT_DECIMALS, withSi: false }),
+          raw: {
             free: polkadotFree.toString(),
             reserved: polkadotReserved.toString(),
-            decimals: DOT_DECIMALS,
-          })
-
-          setPolkadotBalance({
-            free: formatBalance(polkadotFree, { decimals: DOT_DECIMALS, withSi: false }),
-            reserved: formatBalance(polkadotReserved, { decimals: DOT_DECIMALS, withSi: false }),
-            total: formatBalance(polkadotFree.add(polkadotReserved), { decimals: DOT_DECIMALS, withSi: false }),
-            raw: {
-              free: polkadotFree.toString(),
-              reserved: polkadotReserved.toString(),
-            },
-          })
-        } catch (error) {
-          console.error("Error fetching Polkadot balance:", error)
-          toast.error("Failed to fetch Polkadot balance")
-        }
+          },
+        })
+      } catch (error) {
+        console.error("Error fetching Polkadot balance:", error)
+        toast.error("Failed to fetch Polkadot balance")
       }
+    }
 
-      // Unique Network balances
-      if (uniqueApi) {
-        try {
-          const uniqueAccountInfo: any = await uniqueApi.query.system.account(selectedAccount.address)
+    // Unique Network balances
+    if (uniqueApi) {
+      try {
+        const uniqueAccountInfo: any = await uniqueApi.query.system.account(selectedAccount.address)
 
-          const uniqueFree = uniqueAccountInfo.data.free
-          const uniqueReserved = uniqueAccountInfo.data.reserved
+        const uniqueFree = uniqueAccountInfo.data.free
+        const uniqueReserved = uniqueAccountInfo.data.reserved
 
-          console.log("Unique UNQ balances:", {
+        console.log("Unique UNQ balances:", {
+          free: uniqueFree.toString(),
+          reserved: uniqueReserved.toString(),
+          decimals: UNQ_DECIMALS,
+        })
+
+        setUniqueBalance({
+          free: formatBalance(uniqueFree, { decimals: UNQ_DECIMALS, withSi: false }),
+          reserved: formatBalance(uniqueReserved, { decimals: UNQ_DECIMALS, withSi: false }),
+          total: formatBalance(uniqueFree.add(uniqueReserved), { decimals: UNQ_DECIMALS, withSi: false }),
+          raw: {
             free: uniqueFree.toString(),
             reserved: uniqueReserved.toString(),
-            decimals: UNQ_DECIMALS,
-          })
-
-          setUniqueBalance({
-            free: formatBalance(uniqueFree, { decimals: UNQ_DECIMALS, withSi: false }),
-            reserved: formatBalance(uniqueReserved, { decimals: UNQ_DECIMALS, withSi: false }),
-            total: formatBalance(uniqueFree.add(uniqueReserved), { decimals: UNQ_DECIMALS, withSi: false }),
-            raw: {
-              free: uniqueFree.toString(),
-              reserved: uniqueReserved.toString(),
-            },
-          })
-
-          // DOT foreign asset on Unique Network
-          try {
-            const dotBalance = await getDotBalanceOnUnique();
-            setUniqueDotBalance(dotBalance);
-            
-            console.log("DOT balance on Unique Network:", {
-              collectionId: DOT_FOREIGN_ASSET_COLLECTION_ID,
-              balance: dotBalance?.balance,
-              raw: dotBalance?.raw,
-            });
-          } catch (error) {
-            console.error("Error fetching DOT balance on Unique:", error)
-            setUniqueDotBalance({
-              balance: "0",
-              raw: "0",
-            })
-          }
-        } catch (error) {
-          console.error("Error fetching Unique balance:", error)
-          toast.error("Failed to fetch Unique balance")
-        }
+          },
+        })
+      } catch (error) {
+        console.error("Error fetching Unique balance:", error)
+        toast.error("Failed to fetch Unique balance")
       }
-    } catch (error) {
-      console.error("Failed to fetch balances:", error)
-      toast.error("Failed to fetch balances: " + (error instanceof Error ? error.message : "Unknown error"))
     }
-  }, [selectedAccount, polkadotApi, uniqueApi, getDotBalanceOnUnique])
+
+    // DOT foreign asset on Unique Network - now using only SDK
+    try {
+      console.log("Fetching DOT balance on Unique via SDK...")
+      const dotBalance = await getDotBalanceOnUnique();
+      setUniqueDotBalance(dotBalance);
+      
+      console.log("DOT balance on Unique Network (via SDK):", {
+        collectionId: DOT_FOREIGN_ASSET_COLLECTION_ID,
+        balance: dotBalance?.balance,
+        raw: dotBalance?.raw,
+      });
+    } catch (error) {
+      console.error("Error fetching DOT balance on Unique via SDK:", error)
+      setUniqueDotBalance({
+        balance: "0",
+        raw: "0",
+      })
+    }
+
+  } catch (error) {
+    console.error("Failed to fetch balances:", error)
+    toast.error("Failed to fetch balances: " + (error instanceof Error ? error.message : "Unknown error"))
+  }
+}, [selectedAccount, polkadotApi, uniqueApi, getDotBalanceOnUnique])
+
 
   const executeTransfer = async () => {
     if (!selectedAccount || !transferAmount) return
