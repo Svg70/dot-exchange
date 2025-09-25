@@ -529,24 +529,26 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
 
       } else {
         // Asset Hub to Unique transfer
-        if (assetHubBalance) {
-          const availableBalance = new BigNumber(assetHubBalance.raw.free)
-          const feeEstimate = new BigNumber(10).pow(DOT_DECIMALS - 2) // 0.01 DOT estimate
-          const requiredAmount = amount.plus(feeEstimate)
-          
+if (assetHubBalance) {
+          const availableBalance = new BigNumber(assetHubBalance.free.replace(/[,\s]/g, ''))
+          const feeEstimate = new BigNumber(0.1) // Примерная комиссия XCM
+          const requiredAmount = new BigNumber(transferAmount).plus(feeEstimate)
+
           if (availableBalance.lt(requiredAmount)) {
             throw new Error(
-              `Insufficient balance. Available: ${assetHubBalance.free} DOT, Required: ~${formatBalance(
-                requiredAmount.toString(),
-                { decimals: DOT_DECIMALS, withSi: false }
-              )} DOT (including fees)`
+              `Insufficient balance. Available: ${assetHubBalance.free} DOT, Required: ~${requiredAmount.toFixed(4)} DOT (including fees)`
             )
           }
         }
 
         if (!assetHubApi) throw new Error("Asset Hub API not connected")
 
-        // Destination: Unique Network parachain (from Asset Hub perspective)
+        // ======================= НАЧАЛО ИСПРАВЛЕНИЯ ==========================
+        // Создаем типы явно через API, чтобы избежать проблем с кодированием
+        // после обновлений рантайма. Это самый надежный способ.
+
+// Asset Hub to Unique XCM transfer
+        // Используем обычные объекты вместо явного создания типов
         const destination = {
           V4: {
             parents: 1,
@@ -554,22 +556,19 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
           },
         }
 
-        // Beneficiary: account on Unique Network
-        const addressBytes = decodeAddress(selectedAccount.address)
         const beneficiary = {
           V4: {
             parents: 0,
-            interior: { X1: [{ AccountId32: { id: u8aToHex(addressBytes) } }] },
+            interior: { X1: [{ AccountId32: { id: u8aToHex(decodeAddress(selectedAccount.address)) } }] },
           },
         }
 
-        // Assets: DOT from Asset Hub (parents: 1, interior: 'Here' - relay chain DOT)
         const assets = {
           V4: [
             {
               id: {
-                parents: 1,        // Relay chain from parachain perspective
-                interior: 'Here',  // DOT asset
+                parents: 1,
+                interior: 'Here',
               },
               fun: { Fungible: amount.toString() },
             },
@@ -583,18 +582,31 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
           amountFormatted: formatBalance(amount.toString(), { decimals: DOT_DECIMALS, withSi: false })
         })
 
-        // ======================= FIX START ==========================
-        // The correct extrinsic for a reserve-backed transfer from a parachain is `reserveTransferAssets`.
-        // The `transferAssets` extrinsic is a simplified version that might not be suitable for all paths.
-        const tx = assetHubApi.tx.polkadotXcm.reserveTransferAssets(
-          destination,
-          beneficiary,
-          assets,
-          0,           // feeAssetItem
-          "Unlimited", // weightLimit
-        )
-        // ======================== FIX END ===========================
-
+        // Попробуем использовать более простой teleportAssets метод
+        // если reserveTransferAssets продолжает падать
+        let tx;
+        
+        try {
+          // Сначала пробуем reserveTransferAssets
+          tx = assetHubApi.tx.polkadotXcm.limitedReserveTransferAssets(
+            destination,
+            beneficiary,
+            assets,
+            0, // feeAssetItem
+            { Limited: { refTime: "15000000000", proofSize: "262144" } } // Увеличиваем weight limit
+          )
+        } catch (error) {
+          console.log("Fallback to teleportAssets due to:", error)
+          
+          // Fallback: используем teleportAssets для межпарачейных трансферов
+          tx = assetHubApi.tx.polkadotXcm.limitedTeleportAssets(
+            destination,
+            beneficiary,
+            assets,
+            0, // feeAssetItem
+            { Limited: { refTime: "15000000000", proofSize: "262144" } }
+          )
+        }
         setTransactionStatus({ status: "pending", message: "Signing transaction..." })
 
         console.log("Submitting Asset Hub transaction...")
@@ -605,7 +617,11 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
             console.log("Asset Hub transaction included in block:", result.status.asInBlock.toString())
             
             const success = result.events.some(({ event }) => 
-              event.section === 'system' && event.method === 'ExtrinsicSuccess'
+              assetHubApi.events.system.ExtrinsicSuccess.is(event)
+            )
+
+            const failure = result.events.some(({ event }) =>
+              assetHubApi.events.system.ExtrinsicFailed.is(event)
             )
             
             if (success) {
@@ -615,29 +631,34 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
                 hash: result.txHash.toString(),
               })
               toast.success(`Transfer completed: ${transferAmount} DOT`)
+            } else if (failure) {
+              setTransactionStatus({
+                status: "error", 
+                message: "Transaction failed on-chain. Check explorer for details.",
+              })
+              toast.error("Transfer failed during execution.")
             } else {
               setTransactionStatus({
                 status: "error", 
-                message: "Transaction failed - check blockchain explorer for details",
+                message: "Transaction status uncertain. Check explorer.",
               })
-              toast.error("Transfer failed")
+              toast.error("Transaction status uncertain.")
             }
             
             unsub()
 
-            // Refresh balances after successful transaction
             setTimeout(() => {
               fetchBalances()
               setTransferAmount("")
               setTimeout(() => setTransactionStatus({ status: "idle" }), 5000)
-            }, 3000)
+            }, 5000)
           } else if (result.isError) {
             console.error("Asset Hub transaction error:", result)
             setTransactionStatus({
               status: "error",
-              message: "Transaction failed",
+              message: "Transaction failed to broadcast.",
             })
-            toast.error("Transfer failed")
+            toast.error("Transaction failed")
             unsub()
           }
         })
@@ -840,6 +861,8 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
                 </button>
                 {/* <ArrowUpDown className="h-5 w-5 text-gray-400" /> */}
                 <button
+                  disabled={true} // Disable Asset Hub to Unique for now
+                  title="Asset Hub to Unique transfer is currently disabled"
                   onClick={() => setTransferDirection("fromAssetHub")}
                   className={`flex items-center px-4 py-2 rounded-md border ${
                     transferDirection === "fromAssetHub"
