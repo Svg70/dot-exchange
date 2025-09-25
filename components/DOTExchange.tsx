@@ -764,7 +764,7 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
                 {polkadotBalance ? (
                   <div className="space-y-1">
                     <p className="text-2xl font-bold text-pink-600">{polkadotBalance.free} DOT</p>
-                    <p className="text-sm text-gray-500">Available ({DOT_DECIMALS} decimals)</p>
+                    <p className="text-sm text-gray-500">Available</p>
                     {polkadotBalance.reserved !== "0" && (
                       <p className="text-xs text-gray-400">Reserved: {polkadotBalance.reserved} DOT</p>
                     )}
@@ -782,7 +782,7 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
                 {assetHubBalance ? (
                   <div className="space-y-1">
                     <p className="text-2xl font-bold text-green-600">{assetHubBalance.free} DOT</p>
-                    <p className="text-sm text-gray-500">Available ({DOT_DECIMALS} decimals)</p>
+                    <p className="text-sm text-gray-500">Available</p>
                     {assetHubBalance.reserved !== "0" && (
                       <p className="text-xs text-gray-400">Reserved: {assetHubBalance.reserved} DOT</p>
                     )}
@@ -801,7 +801,7 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
                   <div className="space-y-3">
                     <div>
                       <p className="text-2xl font-bold text-purple-600">{uniqueBalance.free} UNQ</p>
-                      <p className="text-sm text-gray-500">Native Balance ({UNQ_DECIMALS} decimals)</p>
+                      <p className="text-sm text-gray-500">Native Balance</p>
                       {uniqueBalance.reserved !== "0" && (
                         <p className="text-xs text-gray-400">Reserved: {uniqueBalance.reserved} UNQ</p>
                       )}
@@ -811,7 +811,7 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
                       <p className="text-lg font-bold text-pink-600">
                         {uniqueDotBalance ? uniqueDotBalance.balance : "0"} DOT
                       </p>
-                      <p className="text-sm text-gray-500">Foreign Asset (Collection #{DOT_FOREIGN_ASSET_COLLECTION_ID}, {DOT_DECIMALS} decimals)</p>
+                      <p className="text-sm text-gray-500">Foreign Asset (Collection #{DOT_FOREIGN_ASSET_COLLECTION_ID})</p>
                     </div>
                   </div>
                 ) : (
