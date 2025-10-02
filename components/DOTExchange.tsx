@@ -472,14 +472,13 @@ export const DOTExchange: React.FC<DOTExchangeProps> = ({ onStateChange }) => {
           amountFormatted: formatBalance(amount.toString(), { decimals: DOT_DECIMALS, withSi: false })
         })
 
-        const tx = polkadotApi.tx.xcmPallet.transferAssets(
-          destination,
-          beneficiary,
-          assets,
-          0,           // feeAssetItem
-          "Unlimited", // weightLimit
-        )
-
+const tx = polkadotApi.tx.xcmPallet.limitedReserveTransferAssets(
+  destination,
+  beneficiary,
+  assets,
+  0,
+  { Limited: { refTime: "5000000000", proofSize: "200000" } }
+)
         setTransactionStatus({ status: "pending", message: "Signing transaction..." })
 
         console.log("Submitting transaction...")
